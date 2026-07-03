@@ -1,7 +1,7 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-RUN apk add --no-cache curl py3-aws-cli jq coreutils
+RUN apk add --no-cache curl
 
 COPY run.sh /
 RUN chmod a+x /run.sh
