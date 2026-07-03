@@ -1,7 +1,7 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.21
+ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-RUN apk add --no-cache curl aws-cli coreutils
+RUN apk add --no-cache curl aws-cli jq coreutils
 
 COPY run.sh /
 RUN chmod a+x /run.sh
