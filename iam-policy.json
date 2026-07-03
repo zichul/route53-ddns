@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListZones",
+      "Effect": "Allow",
+      "Action": "route53:ListHostedZones",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadRecords",
+      "Effect": "Allow",
+      "Action": "route53:ListResourceRecordSets",
+      "Resource": "arn:aws:route53:::hostedzone/ZICHUL_ZONE_ID"
+    },
+    {
+      "Sid": "UpdateHomeRecord",
+      "Effect": "Allow",
+      "Action": "route53:ChangeResourceRecordSets",
+      "Resource": "arn:aws:route53:::hostedzone/ZICHUL_ZONE_ID"
+    }
+  ]
+}

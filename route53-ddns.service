@@ -1,0 +1,14 @@
+[Unit]
+Description=Route 53 Dynamic DNS updater for home.zichul.de
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ddns/ddns.conf
+ExecStart=/usr/local/bin/route53-ddns.sh
+# nie eksportuj sekretów do logów
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log
+PrivateTmp=true
