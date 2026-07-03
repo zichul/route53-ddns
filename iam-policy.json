@@ -11,13 +11,13 @@
       "Sid": "ReadRecords",
       "Effect": "Allow",
       "Action": "route53:ListResourceRecordSets",
-      "Resource": "arn:aws:route53:::hostedzone/ZICHUL_ZONE_ID"
+      "Resource": "arn:aws:route53:::hostedzone/YOUR_ZONE_ID"
     },
     {
       "Sid": "UpdateHomeRecord",
       "Effect": "Allow",
       "Action": "route53:ChangeResourceRecordSets",
-      "Resource": "arn:aws:route53:::hostedzone/ZICHUL_ZONE_ID"
+      "Resource": "arn:aws:route53:::hostedzone/YOUR_ZONE_ID"
     }
   ]
 }

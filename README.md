@@ -1,131 +1,114 @@
-# Route 53 Dynamic DNS — home.zichul.de
+# Route 53 DDNS for Home Assistant
 
-DDNS skrypt który sprawdza publiczny IP co 5 minut i aktualizuje A record
-w AWS Route 53 tylko gdy IP się zmienił.
+Dynamic DNS updater that synchronizes an AWS Route 53 A record with your current public IP.
+Designed for Home Assistant OS (HAOS) but works on any system with Python 3 + boto3.
 
-## Pliki
+## How it works
 
-| Plik | Funkcja |
+1. Checks current public IP via `api.ipify.org`
+2. Queries Route 53 for the existing A record
+3. If different, updates the record via AWS SDK (boto3)
+4. Runs automatically every 5 minutes via HA automation
+
+## Files
+
+| File | Purpose |
 |------|---------|
-| `iam-policy.json` | Polityka IAM least-privilege (tylko update tego 1 rekordu) |
-| `setup-iam.sh` | Tworzy osobny IAM user + access key (uruchom z root creds) |
-| `route53-ddns.sh` | Główny skrypt DDNS |
-| `route53-ddns.service` | systemd service (oneshot) |
-| `route53-ddns.timer` | systemd timer (co 5 min) |
+| `route53_ddns/ddns.py` | Main DDNS script (Python + boto3) |
+| `route53_ddns/run.sh` | HA addon entrypoint (reads Supervisor options) |
+| `route53_ddns/Dockerfile` | HA addon Docker image |
+| `route53_ddns/config.yaml` | HA addon configuration schema |
+| `setup-iam.sh` | Creates dedicated IAM user with least-privilege policy |
+| `iam-policy.json` | IAM policy (only allows updating one A record) |
+| `ha-config/ddns-wrapper.sh` | Wrapper for shell_command approach (no addon) |
+| `ha-config/README-config.md` | Instructions for shell_command setup |
 
-## Setup — krok 1: stwórz osobny IAM user (na maszynie z AWS CLI + root creds)
+## Setup
+
+### Step 1: Create IAM user (on any machine with AWS CLI + root credentials)
 
 ```bash
-# skonfiguruj root creds (tymczasowo, nie zapisuje ich nigdzie)
 export AWS_ACCESS_KEY_ID=<root-key>
 export AWS_SECRET_ACCESS_KEY=<root-secret>
 export AWS_DEFAULT_REGION=eu-central-1
 
-cd ~/code/ddns
+cd route53-ddns
 chmod +x setup-iam.sh
 ./setup-iam.sh
 ```
 
-Skrypt wypisze:
-```
-AWS_ACCESS_KEY_ID = AKIA...
-AWS_SECRET_KEY     = abcd...
-HOSTED_ZONE_ID     = Z123ABC...
-```
+This creates an IAM user with a policy that ONLY allows updating the specified A record.
+Root credentials are used once and never stored.
 
-## Setup — krok 2: instalacja na urządzeniu Home Assistant
+### Step 2a: HA Addon installation (if Supervisor build works)
 
-Założenie: HA na Debian/Ubuntu (Supervised lub Container), nie HAOS.
-Na HAOS (read-only) patrz sekcja "HAOS" poniżej.
+1. Add this repo to HA Add-on Store (Settings > Apps > Store > Menu > Repositories)
+2. Install "Route 53 DDNS"
+3. Configure with AWS credentials in addon settings
+4. Start the addon
 
-```bash
-# 1. katalog konfiguracyjny
-sudo mkdir -p /etc/ddns
-sudo tee /etc/ddns/ddns.conf <<EOF
-AWS_ACCESS_KEY_ID=AKIA...tu_od_setup
-AWS_SECRET_ACCESS_KEY=abcd...tu_od_setup
-AWS_REGION=eu-central-1
-HOSTED_ZONE_ID=Z123...tu_od_setup
-DOMAIN=home.zichul.de
-TTL=300
-IP_CHECK_URL=https://api.ipify.org
-EOF
-sudo chmod 600 /etc/ddns/ddns.conf
-sudo chown root:root /etc/ddns/ddns.conf
+### Step 2b: shell_command approach (recommended for HAOS with Supervisor build issues)
 
-# 2. zainstaluj aws-cli (jeśli nie ma)
-sudo apt-get install -y awscli
+Some HAOS Supervisor versions have a bug preventing addon builds (`/store/repos 404`).
+Use this approach instead:
 
-# 3. instaluj skrypt
-sudo cp route53-ddns.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/route53-ddns.sh
-
-# 4. instaluj systemd unit + timer
-sudo cp route53-ddns.service /etc/systemd/system/
-sudo cp route53-ddns.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now route53-ddns.timer
-
-# 5. test ręczny
-sudo /usr/local/bin/route53-ddns.sh
-```
-
-## Weryfikacja
+1. Install "Terminal & SSH" addon from HA Add-on Store
+2. Configure SSH access (set password, map port 22 to 22222)
+3. Upload scripts to `/config/`:
 
 ```bash
-# sprawdź timer
-systemctl status route53-ddns.timer
-
-# sprawdź logi
-journalctl -u route53-ddns -n 20
-
-# sprawdź DNS z zewnątrz
-dig home.zichul.de +short
+scp -P 22222 route53_ddns/ddns.py root@homeassistant:/config/ddns.py
+scp -P 22222 ha-config/ddns-wrapper.sh root@homeassistant:/config/ddns-wrapper.sh
 ```
 
-## HAOS (Home Assistant OS — read-only)
+4. Edit `/config/ddns-wrapper.sh` — set your AWS credentials
+5. Add to `/config/configuration.yaml`:
 
-HAOS nie pozwala instalować pakietów. Dwie opcje:
-
-### Opcja A: HA automation z shell_command
-W `configuration.yaml`:
 ```yaml
 shell_command:
-  route53_ddns: >
-    AWS_ACCESS_KEY_ID={{ secrets.aws_key }}
-    AWS_SECRET_ACCESS_KEY={{ secrets.aws_secret }}
-    /config/route53-ddns.sh
-```
-Potem automation `trigger` co 5 min wywołuje `shell_command.route53_ddns`.
-Wymaga aws-cli w kontenerze HA (może wymagać dodania przez addon).
-
-### Opcja B: osobny kontener Docker (najprostsze)
-```bash
-docker run -d --name ddns --restart=always \
-  -v /etc/ddns:/etc/ddns:ro \
-  amazon/aws-cli route53 ...  # ale to nie działa jako daemon
-```
-Lepiej: kontener z cron + aws-cli:
-```dockerfile
-FROM amazon/aws-cli:latest
-RUN apk add --no-cache curl
-COPY route53-ddns.sh /route53-ddns.sh
-# cron co 5 min
+  ddns_update: sh /config/ddns-wrapper.sh
 ```
 
-## Bezpieczeństwo
+6. Add to `/config/automations.yaml`:
 
-- `ddns.conf` ma chmod 600, właściciel root
-- IAM polityka pozwala TYLKO na update `home.zichul.de` — nic innego
-- Root creds użyte tylko w `setup-iam.sh` (jeden raz, nie zapisane)
-- Skrypt nie wysyła IP gdy bez zmian (minimalne API calls = minimalny koszt)
-- Route 53 billing: $0.40/milion zapytań — przy zmianie IP max kilka razy/dzień = ~$0.01/m-c
+```yaml
+- alias: "DDNS Route 53 Update"
+  description: "Updates Route 53 A record every 5 minutes"
+  trigger:
+    - platform: time_pattern
+      minutes: "/5"
+  action:
+    - service: shell_command.ddns_update
+      data: {}
+  mode: single
+```
+
+7. Restart Home Assistant (required for shell_command to load)
+8. Verify: call `shell_command.ddns_update` service manually
+
+## Security
+
+- IAM policy allows ONLY `route53:ChangeResourceRecordSets` on one zone
+- IAM policy allows ONLY `route53:ListResourceRecordSets` on one zone
+- Root AWS credentials used once in `setup-iam.sh`, never stored
+- Script makes zero API calls when IP hasn't changed (minimal cost)
+- AWS credentials stored in `/config/secrets.yaml` (or wrapper script)
+
+## Cost
+
+- Route 53 hosted zone: $0.50/month (if you already have one, no extra cost)
+- API calls: ~$0.40 per million — at a few updates per day = ~$0.01/month
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| `brak pliku konfiguracyjnego` | Stwórz `/etc/ddns/ddns.conf` lub `$DDNS_CONF` |
-| `AccessDenied` | Błędne klucze w `ddns.conf` lub źle wpięta polityka IAM |
-| `InvalidChangeBatch` | Rekord nie w tej zone — sprawdź HOSTED_ZONE_ID |
-| `nie udało się pobrać IP` | Sprawdź `IP_CHECK_URL` lub DNS provider — fallback: `https://ifconfig.me` |
+| `ModuleNotFoundError: boto3` | Wrapper script runs `pip3 install boto3` automatically |
+| `InvalidClientTokenId` | Wrong AWS credentials — verify access key ID and secret |
+| `Service shell_command.ddns_update not found` | Restart HA Core (shell_command needs full restart, not just reload) |
+| Supervisor addon build fails | Use shell_command approach (Step 2b) |
+| IP not updating | Check `api.ipify.org` connectivity, verify HA automation is enabled |
+
+## License
+
+MIT

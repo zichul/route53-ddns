@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
-"""Route 53 DDNS updater using AWS SDK (boto3)."""
+"""Route 53 DDNS updater using AWS SDK (boto3).
+Reads config from environment variables passed by shell_command or addon options.
+"""
 import os
 import sys
-import time
 import urllib.request
-import json
 
 import boto3
 
-DOMAIN = os.environ["DOMAIN"]
-HOSTED_ZONE_ID = os.environ["HOSTED_ZONE_ID"]
+DOMAIN = os.environ.get("DOMAIN", "home.example.com")
+HOSTED_ZONE_ID = os.environ.get("HOSTED_ZONE_ID", "")
 TTL = int(os.environ.get("TTL", "300"))
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", "300"))
 IP_CHECK_URL = os.environ.get("IP_CHECK_URL", "https://api.ipify.org")
 
-r53 = boto3.client("route53", region_name=os.environ.get("AWS_REGION", "eu-central-1"))
+if not HOSTED_ZONE_ID:
+    print("ERROR: HOSTED_ZONE_ID not set")
+    sys.exit(1)
+
+r53 = boto3.client(
+    "route53",
+    region_name=os.environ.get("AWS_REGION", "eu-central-1"),
+    aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+    aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+)
 
 
 def get_public_ip():
@@ -22,13 +30,12 @@ def get_public_ip():
     try:
         with urllib.request.urlopen(IP_CHECK_URL, timeout=10) as resp:
             ip = resp.read().decode().strip()
-        # Validate IPv4
         parts = ip.split(".")
         if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
             return None
         return ip
     except Exception as e:
-        print(f"BŁĄD: nie udało się pobrać IP: {e}", flush=True)
+        print(f"ERROR: failed to fetch public IP: {e}", flush=True)
         return None
 
 
@@ -48,7 +55,7 @@ def get_dns_ip():
                     return values[0]["Value"]
         return None
     except Exception as e:
-        print(f"BŁĄD: nie udało się odczytać rekordu DNS: {e}", flush=True)
+        print(f"ERROR: failed to read DNS record: {e}", flush=True)
         return None
 
 
@@ -72,32 +79,26 @@ def update_dns(new_ip):
             },
         )
         change_id = resp["ChangeInfo"]["Id"]
-        print(f"GOTOWE: {DOMAIN} -> {new_ip} (change={change_id})", flush=True)
+        print(f"DONE: {DOMAIN} -> {new_ip} (change={change_id})", flush=True)
         return True
     except Exception as e:
-        print(f"BŁĄD: nie udało się zaktualizować DNS: {e}", flush=True)
+        print(f"ERROR: failed to update DNS: {e}", flush=True)
         return False
 
 
 def main():
-    print(f"[route53-ddns] Start: {DOMAIN} zone={HOSTED_ZONE_ID} interval={CHECK_INTERVAL}s", flush=True)
+    """One-shot mode: check and update once, then exit."""
+    current_ip = get_public_ip()
+    if not current_ip:
+        sys.exit(1)
 
-    while True:
-        current_ip = get_public_ip()
-        if not current_ip:
-            time.sleep(CHECK_INTERVAL)
-            continue
+    dns_ip = get_dns_ip()
 
-        dns_ip = get_dns_ip()
-
-        if current_ip == dns_ip:
-            # No change — silent
-            pass
-        else:
-            print(f"ZMIANA: {dns_ip or 'none'} -> {current_ip} — aktualizuję {DOMAIN}", flush=True)
-            update_dns(current_ip)
-
-        time.sleep(CHECK_INTERVAL)
+    if current_ip == dns_ip:
+        print(f"OK: {DOMAIN} -> {current_ip} (no change)", flush=True)
+    else:
+        print(f"CHANGE: {dns_ip or 'none'} -> {current_ip}", flush=True)
+        update_dns(current_ip)
 
 
 if __name__ == "__main__":

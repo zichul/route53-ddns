@@ -4,11 +4,10 @@ set -eu
 
 OPT_FILE="/data/options.json"
 if [ ! -f "$OPT_FILE" ]; then
-    echo "BŁĄD: brak /data/options.json"
+    echo "ERROR: /data/options.json not found — addon not configured"
     exit 1
 fi
 
-# Extract options and pass to Python script via env
 export AWS_ACCESS_KEY_ID=$(jq -r '.aws_access_key_id' "$OPT_FILE")
 export AWS_SECRET_ACCESS_KEY=$(jq -r '.aws_secret_access_key' "$OPT_FILE")
 export AWS_REGION=$(jq -r '.aws_region' "$OPT_FILE")

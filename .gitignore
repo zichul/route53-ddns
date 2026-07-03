@@ -1,0 +1,9 @@
+# Credentials — NEVER commit
+.ha-credentials.env
+*.env
+!*.env.example
+
+# OS
+.DS_Store
+__pycache__/
+*.pyc
