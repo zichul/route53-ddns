@@ -3,9 +3,8 @@ version: "1.0.0"
 slug: route53_ddns
 description: Dynamic DNS updater — synchronizes home.zichul.de A record with current public IP via AWS Route 53
 arch:
-  - amd64
   - aarch64
-  - armv7
+  - amd64
 init: false
 boot: auto
 startup: services
